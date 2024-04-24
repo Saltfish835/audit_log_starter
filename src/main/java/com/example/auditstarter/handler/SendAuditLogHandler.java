@@ -12,6 +12,7 @@ import org.asynchttpclient.Response;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 
 /**
@@ -19,30 +20,43 @@ import java.util.concurrent.CompletableFuture;
  */
 public class SendAuditLogHandler extends AuditHandler{
 
-    private String url;
+    private final String url;
 
-    private AsyncHttpClient asyncHttpClient;
+    private final AsyncHttpClient asyncHttpClient;
 
-    public SendAuditLogHandler(AuditLogProperties properties, AsyncHttpClient asyncHttpClient) {
+    private final ExecutorService responseHandleThreadPool;
+
+    public SendAuditLogHandler(AuditLogProperties properties, AsyncHttpClient asyncHttpClient, ExecutorService responseHandleThreadPool) {
         this.url = properties.getServiceUrl();
         this.asyncHttpClient = asyncHttpClient;
+        this.responseHandleThreadPool = responseHandleThreadPool;
     }
 
     @Override
     public void processor(AuditLog auditLog) {
+        // 组装请求对象
         Map<String, Object> params = new HashMap<>();
         params.put("srcIP", auditLog.getIp());
         params.put("username", auditLog.getUsername());
         params.put("content", auditLog.getMsg());
         params.put("contentEn", auditLog.getMsgEn());
-        // 异步发送请求
         String jsonContent = new Gson().toJson(params);
         Request request = RequestUtil.getRequest(url, jsonContent);
-        ListenableFuture<Response> future = asyncHttpClient.executeRequest(request);
-        CompletableFuture<Response> completableFuture = future.toCompletableFuture();
-        // 异步响应结果
-        completableFuture.whenCompleteAsync(((response, throwable) -> {
-
-        }));
+        // 异步发送请求
+        ListenableFuture<Response> whenResponse  = asyncHttpClient.executeRequest(request);
+        // 异步处理响应结果
+        whenResponse.addListener(()->{
+            try{
+                Response response = whenResponse.get();
+                int code = response.getStatusCode();
+                if(code == 200) {
+                    System.out.println("send audit log successfully");
+                } else {
+                    System.out.println("send audit log error");
+                }
+            }catch (Exception e) {
+                System.out.println("send audit log error");
+            }
+        }, responseHandleThreadPool);
     }
 }

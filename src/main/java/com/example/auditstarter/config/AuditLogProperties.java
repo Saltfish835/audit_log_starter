@@ -1,5 +1,6 @@
 package com.example.auditstarter.config;
 
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -11,12 +12,12 @@ public class AuditLogProperties {
     /**
      * Netty Boss线程数
      */
-    private int eventLoopGroupBossNum = 2;
+    private int eventLoopGroupBossNum = 1;
 
     /**
      * Netty Worker线程数
      */
-    private int eventLoopGroupWorkerNum = Runtime.getRuntime().availableProcessors();
+    private int eventLoopGroupWorkerNum = 2;
 
     /**
      * 远程保存audit log地址
@@ -52,6 +53,11 @@ public class AuditLogProperties {
      * 空闲连接超时时间
      */
     private int httpPooledConnectionIdleTimeout = 60 * 1000;
+
+    /**
+     * 处理响应的线程数
+     */
+    private int responseHandleThreadNum = 2;
 
 
     public String getServiceUrl() {
@@ -124,5 +130,13 @@ public class AuditLogProperties {
 
     public void setEventLoopGroupWorkerNum(int eventLoopGroupWorkerNum) {
         this.eventLoopGroupWorkerNum = eventLoopGroupWorkerNum;
+    }
+
+    public int getResponseHandleThreadNum() {
+        return responseHandleThreadNum;
+    }
+
+    public void setResponseHandleThreadNum(int responseHandleThreadNum) {
+        this.responseHandleThreadNum = responseHandleThreadNum;
     }
 }

@@ -25,6 +25,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 
 /**
@@ -32,53 +34,59 @@ import java.io.IOException;
  */
 @Configuration
 @EnableConfigurationProperties(AuditLogProperties.class)
+@ConditionalOnProperty(prefix = "audit.log", name="serviceUrl") // 只有在配置文件中配置了audit.log.serviceUrl才启用审计日志记录功能
 public class AuditLogAutoConfiguration implements DisposableBean {
 
     @Autowired
     private AuditLogProperties auditLogProperties;
 
-    @Qualifier("eventLoopGroupBoss")
     private EventLoopGroup eventLoopGroupBoss;
 
-    @Qualifier("eventLoopGroupWorker")
     private EventLoopGroup eventLoopGroupWorker;
 
-    @Autowired
     private AsyncHttpClient asyncHttpClient;
 
+    private ExecutorService responseHandleThreadPool;
+
     @Bean
-    @ConditionalOnProperty(prefix = "audit.log")
     public Advisor auditLogAnnotationAdvisor(BeanFactory beanFactory) {
+        // 初始化所需参数
+        initEventLoopGroupBoss();
+        initEventLoopGroupWorker();
+        initAsyncHttpClient();
+        initResponseHandleThreadPool();
         // 拦截所有被AuditLog注解修饰的方法
-        AuditLogAnnotationInterceptor interceptor = new AuditLogAnnotationInterceptor(beanFactory, auditLogProperties, asyncHttpClient);
+        AuditLogAnnotationInterceptor interceptor = new AuditLogAnnotationInterceptor(beanFactory, auditLogProperties, asyncHttpClient, responseHandleThreadPool);
         AnnotationMatchingPointcut pointcut = AnnotationMatchingPointcut.forMethodAnnotation(AuditLog.class);
         return new DefaultPointcutAdvisor(pointcut,interceptor);
     }
 
 
-    @Bean("eventLoopGroupBoss")
-    public EventLoopGroup initEventLoopGroupBoss() {
+    public void initEventLoopGroupBoss() {
         if(RemotingUtil.isLinuxPlatform() && Epoll.isAvailable()) { // 当前环境可以使用epoll模式
-            return new EpollEventLoopGroup(auditLogProperties.getEventLoopGroupBossNum(), new DefaultThreadFactory("netty-boss-epoll"));
+            this.eventLoopGroupBoss = new EpollEventLoopGroup(auditLogProperties.getEventLoopGroupBossNum(),
+                    new DefaultThreadFactory("netty-boss-epoll"));
         }else {
-            return new NioEventLoopGroup(auditLogProperties.getEventLoopGroupBossNum(), new DefaultThreadFactory("netty-boss-nio"));
+            this.eventLoopGroupBoss = new NioEventLoopGroup(auditLogProperties.getEventLoopGroupBossNum(),
+                    new DefaultThreadFactory("netty-boss-nio"));
         }
     }
 
 
-    @Bean("initEventLoopGroupWorker")
-    public EventLoopGroup initEventLoopGroupWorker() {
-        if(RemotingUtil.isLinuxPlatform() && Epoll.isAvailable()) {
-            return new EpollEventLoopGroup(auditLogProperties.getEventLoopGroupWorkerNum(), new DefaultThreadFactory("netty-worker-epoll"));
+    public void initEventLoopGroupWorker() {
+        if(RemotingUtil.isLinuxPlatform() && Epoll.isAvailable()) { // 当前环境可以使用epoll模式
+            this.eventLoopGroupWorker =  new EpollEventLoopGroup(auditLogProperties.getEventLoopGroupWorkerNum(),
+                    new DefaultThreadFactory("netty-worker-epoll"));
         }else {
-            return new NioEventLoopGroup(auditLogProperties.getEventLoopGroupWorkerNum(), new DefaultThreadFactory("netty-worker-nio"));
+            this.eventLoopGroupWorker = new NioEventLoopGroup(auditLogProperties.getEventLoopGroupWorkerNum(),
+                    new DefaultThreadFactory("netty-worker-nio"));
         }
     }
 
 
-    @Bean
-    public AsyncHttpClient initAsyncHttpClient() {
-        DefaultAsyncHttpClientConfig.Builder builder = new DefaultAsyncHttpClientConfig.Builder().setEventLoopGroup(eventLoopGroupWorker)
+    public void initAsyncHttpClient() {
+        DefaultAsyncHttpClientConfig.Builder builder = new DefaultAsyncHttpClientConfig.Builder()
+                .setEventLoopGroup(eventLoopGroupWorker)
                 .setConnectTimeout(auditLogProperties.getHttpConnectTimeout())
                 .setRequestTimeout(auditLogProperties.getHttpRequestTimeout())
                 .setMaxRequestRetry(auditLogProperties.getHttpMaxRequestRetry())
@@ -87,7 +95,12 @@ public class AuditLogAutoConfiguration implements DisposableBean {
                 .setMaxConnections(auditLogProperties.getHttpMaxContentions())
                 .setMaxConnectionsPerHost(auditLogProperties.getHttpConnectionsPerHost())
                 .setPooledConnectionIdleTimeout(auditLogProperties.getHttpPooledConnectionIdleTimeout());
-        return new DefaultAsyncHttpClient(builder.build());
+        this.asyncHttpClient =  new DefaultAsyncHttpClient(builder.build());
+    }
+
+
+    public void initResponseHandleThreadPool() {
+        this.responseHandleThreadPool = Executors.newFixedThreadPool(auditLogProperties.getResponseHandleThreadNum());
     }
 
 
@@ -109,6 +122,9 @@ public class AuditLogAutoConfiguration implements DisposableBean {
         }
         if(eventLoopGroupWorker != null) {
             eventLoopGroupWorker.shutdownGracefully();
+        }
+        if(responseHandleThreadPool != null) {
+            responseHandleThreadPool.shutdown();
         }
     }
 }
